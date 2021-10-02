@@ -14,7 +14,7 @@
 
 docker-push:
 	@gcloud builds submit \
-		--project "gcr-cleaner" \
+		--project "reloaddk-data" \
 		--config ./cloudbuild/cloudbuild.yaml \
 		.
 .PHONY: docker-push

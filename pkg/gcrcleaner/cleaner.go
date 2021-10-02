@@ -164,10 +164,58 @@ func (c *Cleaner) deleteOne(ref gcrname.Reference, dryRun bool) error {
 	return nil
 }
 
-// shouldDelete returns true if the manifest has no tags or allows deletion of tagged images
+// shouldDelete returns true if the manifest has no tags, or allows deletion of tagged images
 // and is before the requested time.
 func (c *Cleaner) shouldDelete(m gcrgoogle.ManifestInfo, since time.Time, allowTag bool, tagFilterRegexp *regexp.Regexp) bool {
-	return (len(m.Tags) == 0 || (allowTag && tagFilterRegexp.MatchString(m.Tags[0]))) && m.Uploaded.UTC().Before(since)
+	isDateTag := regexp.MustCompile(`^.*-latest-(\d{4}-\d{2}-\d{2})$`)
+	isLatestTag := regexp.MustCompile(`^.*-latest$`)
+	dateLayout := "2006-01-02"
+
+	// We have two types of custom tags. "Latest" tags on the form .*-latest and
+	// date tags on the form *-latest-date.
+	// A expired manifest with only date-tags should still be deleted, so we
+	// set up our own list of filtered tags that only contain our custom latest-
+	// tags.
+	filteredTags := make([]string, 0)
+
+	if len(m.Tags) > 0 {
+		for _, tag := range m.Tags {
+			// Our custom latest-tags should be kept.
+			if isLatestTag.MatchString(tag) {
+				filteredTags = append(filteredTags, tag)
+				break
+			}
+
+			// See if this is a custom date tag, if not it is a normal tag, and
+			// should just go into the list and we'll continue to the next tag.
+			matches := isDateTag.FindStringSubmatch(tag)
+			if len(matches) == 0 {
+				filteredTags = append(filteredTags, tag)
+				break
+			}
+
+			// We have a custom date-tag.
+			// The custom date-tags should not go on the list, but can be used to
+			// update the Uploaded date of the manifest.
+			t, err := time.Parse(dateLayout, matches[1])
+			if err != nil {
+				// We've hit a date that matched the regex but did not parse.
+				// Stick it on the list which should protect it from being deleted
+				// and let the user handle it.
+				filteredTags = append(filteredTags, tag)
+				break
+			}
+
+			// We don't actually want the date tags to be handled as normal tags,
+			// instead we use it to tweak the uploaded date in case it is in front of
+			// the uploaded date.
+			if t.After(m.Uploaded) {
+				m.Uploaded = t
+			}
+		}
+	}
+
+	return (len(filteredTags) == 0 || (allowTag && tagFilterRegexp.MatchString(filteredTags[0]))) && m.Uploaded.UTC().Before(since)
 }
 
 func (c *Cleaner) ListChildRepositories(ctx context.Context, rootRepository string) ([]string, error) {
