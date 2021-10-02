@@ -1,0 +1,9 @@
+on: push
+name: Test build
+jobs:
+  go_test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@master
+    - uses: actions/setup-go@v2
+    - run: go test github.com/sethvargo/gcr-cleaner/pkg/gcrcleaner
